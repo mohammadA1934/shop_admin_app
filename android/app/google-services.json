@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "32151971543",
+    "project_id": "shoppinest-16fec",
+    "storage_bucket": "shoppinest-16fec.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32151971543:android:055c1ed3807fddad39b292",
+        "android_client_info": {
+          "package_name": "com.shoppinest.shop_admin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4K8_9NljffFiPRIXRQtPKLZ6N52zO43U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32151971543:android:8efba127d7e51bee39b292",
+        "android_client_info": {
+          "package_name": "com.shoppinest.user_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4K8_9NljffFiPRIXRQtPKLZ6N52zO43U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
