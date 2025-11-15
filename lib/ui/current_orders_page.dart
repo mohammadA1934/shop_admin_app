@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 // صفحات سابقة عندك
 import 'dashboard_page.dart';
@@ -8,6 +9,44 @@ import 'shop_profile_page.dart';
 // ✅ إضافات للتنقل من الـ bottom bar
 import 'customer_messages_pages.dart';
 import 'reports_page.dart' as rp;
+
+// =======================================================================
+// 💡 الدالة المُحسّنة لجلب اسم العميل (أو الجزء الأول من الإيميل)
+// =======================================================================
+Future<String> _fetchCustomerName(String uid) async {
+  if (uid.isEmpty) return 'Customer (No UID)';
+  try {
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users') // 💡 افتراض اسم المجموعة 'users'
+        .doc(uid)
+        .get(const GetOptions(source: Source.serverAndCache));
+
+    if (userDoc.exists) {
+      final data = userDoc.data() as Map<String, dynamic>?;
+
+      // 1. الترتيب التفضيلى: Name, ثم DisplayName, ثم Email
+      final nameOrEmail = data?['name'] ?? data?['displayName'] ?? data?['email'];
+
+      if (nameOrEmail != null && nameOrEmail.toString().isNotEmpty) {
+        final nameString = nameOrEmail.toString();
+
+        // 2. إذا كانت المعلومة تبدو كإيميل، نأخذ الجزء الذي قبل علامة @
+        if (nameString.contains('@')) {
+          // مثال: 'john.doe@example.com' يُصبح 'john.doe'
+          return nameString.split('@').first;
+        }
+
+        // 3. إذا كانت اسماً صريحاً (لا يحتوي @)، نعرضه كما هو
+        return nameString;
+      }
+    }
+  } catch (e) {
+    if (kDebugMode) debugPrint('Error fetching user profile for $uid: $e');
+    return 'Customer (Error)';
+  }
+  return 'Customer (Profile Missing)';
+}
+// =======================================================================
 
 class CurrentOrdersPage extends StatelessWidget {
   const CurrentOrdersPage({super.key, required this.storeId});
@@ -135,7 +174,7 @@ class CurrentOrdersPage extends StatelessWidget {
   }
 }
 
-/// صفحة تعديل الحالات
+//// ================== EditOrderStatusesPage ==================
 class EditOrderStatusesPage extends StatelessWidget {
   const EditOrderStatusesPage({super.key, required this.storeId});
   final String storeId;
@@ -210,7 +249,7 @@ class EditOrderStatusesPage extends StatelessWidget {
   }
 }
 
-/// شريط يوضح المصدر/الكاش والـ pending writes
+//// ================== Snapshot Debug Header ==================
 class _SnapshotDebugHeader extends StatelessWidget {
   const _SnapshotDebugHeader({required this.stream});
   final Stream<QuerySnapshot> stream;
@@ -259,7 +298,7 @@ class _SnapshotDebugHeader extends StatelessWidget {
   }
 }
 
-/// عند عدم وجود نتائج، نفحص أحدث 3 طلبات بدون فلتر ونشرح السبب
+//// ================== EmptyWithDiagnosis ==================
 class _EmptyWithDiagnosis extends StatelessWidget {
   const _EmptyWithDiagnosis({required this.storeId});
   final String storeId;
@@ -341,7 +380,7 @@ class _EmptyWithDiagnosis extends StatelessWidget {
   }
 }
 
-/// كرت الطلب (عرض فقط)
+//// ================== Order Card Compact ==================
 class _OrderCardCompact extends StatelessWidget {
   const _OrderCardCompact({
     required this.docId,
@@ -357,57 +396,64 @@ class _OrderCardCompact extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 🛑 تم إزالة تشخيص اسم العميل القديم
+
     final idLabel = (data['orderNo']?.toString().padLeft(4, '0')) ?? docId;
-    final customer =
-    (data['customerName'] ?? data['buyerName'] ?? 'Customer').toString();
+    final customerUid = (data['customerUid'] ?? '').toString(); // 💡 جلب الـ UID
     final status = (data['status'] ?? 'pending').toString().toLowerCase();
     final items = (data['items'] as List?) ?? const [];
     final total = _calcTotal(items);
 
-    return Container(
-      decoration: _box(),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    // 💡 استخدام FutureBuilder لجلب اسم العميل
+    return FutureBuilder<String>(
+      future: _fetchCustomerName(customerUid),
+      builder: (context, snapshot) {
+        final customer = snapshot.data ?? 'Customer'; // الاسم الذي يتم عرضه
+
+        return Container(
+          decoration: _box(),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Order ID:#$idLabel',
+              Row(
+                children: [
+                  Text('Order ID:#$idLabel',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, color: Colors.black87)),
+                  const Spacer(),
+                  _StatusChip(status: status),
+                ],
+              ),
+              const SizedBox(height: 4),
+              // 💡 عرض الاسم الذي تم جلبه
+              Text(customer,
                   style: const TextStyle(
-                      fontWeight: FontWeight.w700, color: Colors.black87)),
-              const Spacer(),
-              _StatusChip(status: status),
+                      fontWeight: FontWeight.w600, color: Colors.black87)),
+              const SizedBox(height: 8),
+              for (final it in items.take(3)) _OrderItemTile(item: it as Map),
+              if (items.length > 3)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('… +${items.length - 3} more',
+                      style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                ),
+              const SizedBox(height: 8),
+              Text('Total: ${_format(total)}',
+                  style:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 6),
+
+
             ],
           ),
-          const SizedBox(height: 4),
-          Text(customer,
-              style: const TextStyle(
-                  fontWeight: FontWeight.w600, color: Colors.black87)),
-          const SizedBox(height: 8),
-          for (final it in items.take(3)) _OrderItemTile(item: it as Map),
-          if (items.length > 3)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text('… +${items.length - 3} more',
-                  style: const TextStyle(color: Colors.black54, fontSize: 12)),
-            ),
-          const SizedBox(height: 8),
-          Text('Total: ${_format(total)}',
-              style:
-              const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-          const SizedBox(height: 6),
-          // سطر تشخيصي صغير لكل طلب
-          Text(
-            'debug: fromCache=$fromCache, pendingWrites=$pendingWrites, storeId=${data['storeId'] ?? 'null'}',
-            style: const TextStyle(fontSize: 11, color: Colors.black45),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-/// كرت الطلب مع أزرار تغيير الحالة
+//// ================== Order Card With Actions ==================
 class _OrderCardWithActions extends StatelessWidget {
   const _OrderCardWithActions({required this.docId, required this.data});
 
@@ -426,9 +472,10 @@ class _OrderCardWithActions extends StatelessWidget {
         );
       }
     } catch (_) {
+      // ⚠️ هذا هو المكان الذي تظهر فيه رسالة PERMISSION_DENIED
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تعذر التحديث، حاول مجددًا')),
+          const SnackBar(content: Text('تعذر التحديث، حاول مجددًا (تحقق من قواعد الأمان)')),
         );
       }
     }
@@ -436,126 +483,248 @@ class _OrderCardWithActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 🛑 تم إزالة تشخيص اسم العميل القديم
+
     final idLabel = (data['orderNo']?.toString().padLeft(4, '0')) ?? docId;
-    final customer =
-    (data['customerName'] ?? data['buyerName'] ?? 'Customer').toString();
+    final customerUid = (data['customerUid'] ?? '').toString(); // 💡 جلب الـ UID
     final status = (data['status'] ?? 'pending').toString().toLowerCase();
     final items = (data['items'] as List?) ?? const [];
     final total = _calcTotal(items);
 
-    return Container(
-      decoration: _box(),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    // 💡 استخدام FutureBuilder لجلب اسم العميل
+    return FutureBuilder<String>(
+      future: _fetchCustomerName(customerUid),
+      builder: (context, snapshot) {
+        final customer = snapshot.data ?? 'Customer'; // الاسم الذي يتم عرضه
+
+        return Container(
+          decoration: _box(),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Order ID:#$idLabel',
+              Row(
+                children: [
+                  Text('Order ID:#$idLabel',
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, color: Colors.black87)),
+                  const Spacer(),
+                  _StatusChip(status: status),
+                ],
+              ),
+              const SizedBox(height: 4),
+              // 💡 عرض اسم العميل
+              Text(customer,
                   style: const TextStyle(
-                      fontWeight: FontWeight.w700, color: Colors.black87)),
-              const Spacer(),
-              _StatusChip(status: status),
+                      fontWeight: FontWeight.w600, color: Colors.black87)),
+              const SizedBox(height: 8),
+              for (final it in items) _OrderItemTile(item: it as Map),
+              const SizedBox(height: 8),
+              Text('Total: ${_format(total)}',
+                  style:
+                  const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              const SizedBox(height: 12),
+
+              if (status == 'pending')
+                Row(
+                  children: [
+                    Expanded(
+                      child: _ActionButton(
+                        label: 'Cancel',
+                        color: const Color(0xFFE74C3C),
+                        onPressed: () => _update(context, 'canceled'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _ActionButton(
+                        label: 'Confirm',
+                        color: const Color(0xFF2ECC71),
+                        onPressed: () => _update(context, 'confirmed'),
+                      ),
+                    ),
+                  ],
+                )
+              else if (status == 'confirmed')
+                _ActionButton(
+                  label: 'Completed',
+                  color: const Color(0xFF3498DB),
+                  onPressed: () => _update(context, 'completed'),
+                )
+              else
+                const SizedBox.shrink(),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(customer,
-              style: const TextStyle(
-                  fontWeight: FontWeight.w600, color: Colors.black87)),
-          const SizedBox(height: 8),
-          for (final it in items) _OrderItemTile(item: it as Map),
-          const SizedBox(height: 8),
-          Text('Total: ${_format(total)}',
-              style:
-              const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-          const SizedBox(height: 12),
-
-          if (status == 'pending')
-            Row(
-              children: [
-                Expanded(
-                  child: _ActionButton(
-                    label: 'Cancel',
-                    color: const Color(0xFFE74C3C),
-                    onPressed: () => _update(context, 'canceled'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _ActionButton(
-                    label: 'Confirm',
-                    color: const Color(0xFF2ECC71),
-                    onPressed: () => _update(context, 'confirmed'),
-                  ),
-                ),
-              ],
-            )
-          else if (status == 'confirmed')
-            _ActionButton(
-              label: 'Completed',
-              color: const Color(0xFF3498DB),
-              onPressed: () => _update(context, 'completed'),
-            )
-          else
-            const SizedBox.shrink(),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
-/// عنصر منتج داخل الطلب
-class _OrderItemTile extends StatelessWidget {
+//// ================== Order Item Tile (الإصدار المُصحَّح والنهائي) ==================
+class _OrderItemTile extends StatefulWidget {
   const _OrderItemTile({required this.item});
   final Map item;
 
   @override
+  State<_OrderItemTile> createState() => _OrderItemTileState();
+}
+
+class _OrderItemTileState extends State<_OrderItemTile> {
+  // 1. تحديد معرّف المنتج واسمه بناءً على التشخيص
+  late final String? productIdFromItem;
+  late final String productNameFromItem;
+
+  @override
+  void initState() {
+    super.initState();
+    // 💡 تصحيح اسم الحقل: الـ ID كان صحيحاً، لكن الاسم كان 'title'
+    productIdFromItem = (widget.item['productId'] ?? widget.item['id'] ?? widget.item['product_id']) as String?;
+
+    // 🔍 التشخيص: نطبع جميع المفاتيح الموجودة في الـ "item" - هذا السطر مهم جداً
+    if (kDebugMode) {
+      debugPrint('*** DIAGNOSIS - Order Item Keys: ${widget.item.keys.join(', ')}');
+      debugPrint('*** DIAGNOSIS - Item Data: ${widget.item.toString()}');
+    }
+
+    // 🛑 التعديل لاسم المنتج: إضافة مفاتيح محتملة جديدة
+    productNameFromItem = (widget.item['title'] ??
+        widget.item['name'] ??
+        widget.item['productName'] ??
+        widget.item['product_name'] ??
+        'Unnamed Product').toString();
+  }
+
+  // 2. دالة جلب الصورة الأحدث من المنتج الأصلي
+  Future<String> _getUpdatedImageUrl() async {
+    // 💡 تصحيح اسم الحقل: الصورة القديمة في الطلب هي 'imageUrl'
+    final originalUrl = (widget.item['imageUrl'] ??
+        widget.item['product-images'] ??
+        widget.item['image'] ?? '') as String;
+
+    if (productIdFromItem == null || productIdFromItem!.isEmpty) {
+      debugPrint('*** DEBUG-FAIL: Product ID is MISSING in item. Using old URL: $originalUrl');
+      return _cleanUrl(originalUrl);
+    }
+
+    try {
+      final productDoc = await FirebaseFirestore.instance
+          .collection('products')
+          .doc(productIdFromItem!)
+          .get(const GetOptions(source: Source.server));
+
+      if (!productDoc.exists) {
+        debugPrint('*** DEBUG-FAIL: Product document ID: ${productIdFromItem!} DOES NOT EXIST on SERVER.');
+        return _cleanUrl(originalUrl);
+      }
+
+      final productData = productDoc.data() as Map<String, dynamic>;
+
+      // 🛑 التعديل الحاسم للصورة: نبحث عن أحدث صورة في وثيقة المنتج
+      final newImageUrl = productData['imageUrl'] ??
+          productData['product-images'] ??
+          productData['imgURL'] as String?;
+
+      if (newImageUrl != null && newImageUrl.isNotEmpty) {
+        debugPrint('*** DEBUG-SUCCESS-FINAL: Fetched NEW URL for ${productNameFromItem}. URL: $newImageUrl');
+        return _cleanUrl(newImageUrl);
+      }
+
+      debugPrint('*** DEBUG-FAIL: Product document exists, but imageUrl field is empty or missing. Using old URL.');
+
+    } catch (e) {
+      debugPrint('*** DEBUG-CATCH: Server fetch error for ${productIdFromItem!}: $e');
+    }
+
+    return _cleanUrl(originalUrl);
+  }
+
+  // دالة مساعدة لتنظيف الرابط (نتركها كما هي)
+  String _cleanUrl(String url) {
+    String cleaned = url.trim();
+    if (cleaned.isNotEmpty && !cleaned.startsWith('http')) {
+      return 'https://$cleaned';
+    }
+    return cleaned;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final name = (item['name'] ?? item['productName'] ?? 'Item').toString();
+    final item = widget.item;
+    // 💡 استخدام الاسم الصحيح
+    final name = productNameFromItem;
     final qty = (item['quantity'] ?? item['qty'] ?? 1) as num;
     final price = (item['price'] ?? item['itemPrice'] ?? 0).toDouble();
-    final img = (item['imageUrl'] ?? item['image'] ?? '') as String;
+    final total = price * qty;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: img.isNotEmpty
-                ? Image.network(img, width: 70, height: 70, fit: BoxFit.cover)
-                : Container(
-              width: 70,
-              height: 70,
-              color: const Color(0xFFF1F5F9),
-              child: const Icon(Icons.image_not_supported_outlined),
-            ),
+    // 3. نستخدم FutureBuilder لجلب الصورة ثم عرضها
+    return FutureBuilder<String>(
+      future: _getUpdatedImageUrl(),
+      builder: (context, snapshot) {
+        final img = snapshot.data ?? ''; // الرابط الذي تم جلبه
+
+        // 🔴 سطر التشخيص: للتأكد من الرابط الذي يتم جلبه (سيظهر الآن الاسم الصحيح)
+        if (kDebugMode) {
+          debugPrint('*** SMART-IMAGE: Product Name: $name | URL: $img | Status: ${snapshot.connectionState}');
+        }
+
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: (snapshot.connectionState == ConnectionState.waiting)
+                    ? Container( // حالة الانتظار
+                  width: 70, height: 70, color: const Color(0xFFF1F5F9),
+                  child: const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+                )
+                    : (img.isNotEmpty
+                    ? Image.network( // الصورة النهائية
+                  img,
+                  width: 70,
+                  height: 70,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: 70, height: 70, color: const Color(0xFFF1F5F9),
+                    child: const Icon(Icons.broken_image_outlined),
+                  ),
+                )
+                    : Container( // الصورة فارغة
+                  width: 70, height: 70, color: const Color(0xFFF1F5F9),
+                  child: const Icon(Icons.image_not_supported_outlined),
+                )
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('$name (${qty.toInt()})',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                    const SizedBox(height: 2),
+                    Text('Item Price: ${_format(price)}',
+                        style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                  ],
+                ),
+              ),
+              Text(_format(total),
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('$name(${qty.toInt()})',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, fontSize: 13.5)),
-                const SizedBox(height: 2),
-                Text('Item Price: ${_format(price)}',
-                    style:
-                    const TextStyle(fontSize: 12, color: Colors.black54)),
-              ],
-            ),
-          ),
-          Text(_format(price * qty),
-              style:
-              const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-        ],
-      ),
+        );
+      },
     );
   }
 }
 
+//// ================== Status Chip, Action Button, Store Header, BottomNav, Helpers ==================
+// ... (بقية الـ Widgets المساعدة لم يتم تغييرها)
+
 class _StatusChip extends StatelessWidget {
+// ... (الكود لا يتغير)
   const _StatusChip({required this.status});
   final String status;
 
@@ -656,8 +825,8 @@ class _StoreHeaderChipSmall extends StatelessWidget {
               radius: 12,
               backgroundColor: primary.withOpacity(.15),
               backgroundImage:
-              (logo != null && logo.isNotEmpty) ? NetworkImage(logo) : null,
-              child: (logo == null || logo.isEmpty)
+              (logo != null && logo!.isNotEmpty) ? NetworkImage(logo!) : null,
+              child: (logo == null || logo!.isEmpty)
                   ? Icon(Icons.store, color: primary, size: 16)
                   : null,
             ),
@@ -744,5 +913,4 @@ double _calcTotal(List items) {
   }
   return t;
 }
-
 String _format(num v) => '${v.toStringAsFixed(2)} JD';

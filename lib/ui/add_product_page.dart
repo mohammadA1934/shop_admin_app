@@ -1,18 +1,12 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
-
-import 'dashboard_page.dart';
-import 'shop_profile_page.dart';
-
-// ✅ إضافات للتنقل من الـ bottom bar
-import 'customer_messages_pages.dart';
-import 'reports_page.dart' as rp;
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AddProductPage extends StatefulWidget {
   const AddProductPage({super.key, this.storeId});
-
-  /// لو أرسلتها من products_list_page خذها؛ وإلا نستخدم UID الحالي كـ storeId
   final String? storeId;
 
   @override
@@ -32,6 +26,8 @@ class _AddProductPageState extends State<AddProductPage> {
   final _qtyCtrl = TextEditingController();
 
   bool _loading = false;
+  File? _pickedImage;
+  String? _uploadedImageUrl;
 
   @override
   void dispose() {
@@ -69,6 +65,33 @@ class _AddProductPageState extends State<AddProductPage> {
     );
   }
 
+  /// 📸 اختيار صورة من المعرض
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (picked != null) {
+      setState(() {
+        _pickedImage = File(picked.path);
+      });
+    }
+  }
+
+  /// ☁️ رفع الصورة إلى Supabase
+  Future<String?> _uploadImageToSupabase(File file) async {
+    try {
+      final supabase = Supabase.instance.client;
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.path.split('/').last}';
+      final path = 'products/$fileName';
+
+      await supabase.storage.from('product-images').upload(path, file);
+      final url = supabase.storage.from('product-images').getPublicUrl(path);
+      return url;
+    } catch (e) {
+      debugPrint('❌ Upload failed: $e');
+      return null;
+    }
+  }
+
   Future<void> _addProduct() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
@@ -88,6 +111,13 @@ class _AddProductPageState extends State<AddProductPage> {
 
     setState(() => _loading = true);
     try {
+      String? imageUrl = _uploadedImageUrl;
+
+      // لو اختار صورة بس ما انرفعت بعد
+      if (_pickedImage != null && imageUrl == null) {
+        imageUrl = await _uploadImageToSupabase(_pickedImage!);
+      }
+
       await FirebaseFirestore.instance.collection('products').add({
         'storeId': storeId,
         'name': name,
@@ -95,17 +125,17 @@ class _AddProductPageState extends State<AddProductPage> {
         'price': price,
         'quantity': qty,
         'inStock': qty > 0,
-        'imageUrl': null,
+        'imageUrl': imageUrl,
         'createdAt': Timestamp.now(),
       });
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تمت إضافة المنتج بنجاح ✅')),
+        const SnackBar(content: Text('✅ تمت إضافة المنتج بنجاح')),
       );
-
       Navigator.of(context).pop(true);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('🔥 Error adding product: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تعذر إضافة المنتج. حاول مجددًا.')),
@@ -124,15 +154,8 @@ class _AddProductPageState extends State<AddProductPage> {
           icon: const Icon(Icons.arrow_back_ios_new),
           onPressed: () => Navigator.of(context).maybePop(),
         ),
-        title: const Text(
-          'Add New Product',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
+        title: const Text('Add New Product', style: TextStyle(fontWeight: FontWeight.w700)),
         centerTitle: true,
-        actions: const [
-          _StoreHeaderChipSmall(),
-          SizedBox(width: 8),
-        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -148,15 +171,23 @@ class _AddProductPageState extends State<AddProductPage> {
                   const SizedBox(height: 6),
                   InkWell(
                     borderRadius: BorderRadius.circular(12),
-                    onTap: () {},
+                    onTap: _pickImage,
                     child: Container(
-                      height: 140,
+                      height: 160,
+                      width: double.infinity,
                       decoration: BoxDecoration(
                         color: Colors.white,
                         border: Border.all(color: kBorder),
                         borderRadius: BorderRadius.circular(12),
+                        image: _pickedImage != null
+                            ? DecorationImage(
+                          image: FileImage(_pickedImage!),
+                          fit: BoxFit.cover,
+                        )
+                            : null,
                       ),
-                      child: const Center(
+                      child: _pickedImage == null
+                          ? const Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -165,7 +196,8 @@ class _AddProductPageState extends State<AddProductPage> {
                             Text('Tap to upload image', style: TextStyle(color: kHint)),
                           ],
                         ),
-                      ),
+                      )
+                          : null,
                     ),
                   ),
                   const SizedBox(height: 18),
@@ -194,8 +226,7 @@ class _AddProductPageState extends State<AddProductPage> {
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _priceCtrl,
-                    keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: _dec('0.00'),
                     validator: (v) {
                       final s = v?.trim() ?? '';
@@ -210,8 +241,7 @@ class _AddProductPageState extends State<AddProductPage> {
                   const SizedBox(height: 6),
                   TextFormField(
                     controller: _qtyCtrl,
-                    keyboardType:
-                    const TextInputType.numberWithOptions(signed: false),
+                    keyboardType: const TextInputType.numberWithOptions(signed: false),
                     decoration: _dec('0'),
                     validator: (v) {
                       final s = v?.trim() ?? '';
@@ -241,8 +271,7 @@ class _AddProductPageState extends State<AddProductPage> {
                         height: 22,
                         child: CircularProgressIndicator(
                           strokeWidth: 2.3,
-                          valueColor:
-                          AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                         ),
                       )
                           : const Text(
@@ -260,134 +289,6 @@ class _AddProductPageState extends State<AddProductPage> {
           ),
         ),
       ),
-
-      // ✅ Bottom bar
-      bottomNavigationBar: SafeArea(
-        child: Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(.05), blurRadius: 8),
-            ],
-          ),
-          child: NavigationBar(
-            selectedIndex: 1, // كما هو
-            indicatorColor: Colors.transparent,
-            destinations: const [
-              NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
-              NavigationDestination(icon: Icon(Icons.inbox_outlined), label: 'Inbox'),
-              NavigationDestination(
-                icon: Icon(Icons.bar_chart_outlined),
-                label: 'Reports',
-              ),
-            ],
-            onDestinationSelected: (i) async {
-              if (i == 0) {
-                // Home → Dashboard
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const DashboardPage()),
-                      (_) => false,
-                );
-              } else if (i == 1) {
-                // ✅ Inbox → Customer Messages
-                final sid =
-                    widget.storeId ?? FirebaseAuth.instance.currentUser?.uid;
-                if (sid != null) {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => CustomerMessagesIndexPage(storeId: sid),
-                    ),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('لا يمكن فتح الرسائل الآن.')),
-                  );
-                }
-              } else if (i == 2) {
-                // ✅ Reports → ReportsPage
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const rp.ReportsPage()),
-                );
-              }
-            },
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StoreHeaderChipSmall extends StatelessWidget {
-  const _StoreHeaderChipSmall();
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
-
-    return StreamBuilder<DocumentSnapshot>(
-      stream:
-      FirebaseFirestore.instance.collection('shops').doc(uid).snapshots(),
-      builder: (context, snap) {
-        String name = 'Store';
-        String? logo;
-        if (snap.hasData && snap.data!.exists) {
-          final data = snap.data!.data() as Map<String, dynamic>;
-          name = (data['name'] as String?)?.trim().isNotEmpty == true
-              ? data['name']
-              : 'Store';
-          logo = data['logoUrl'] as String?;
-        }
-
-        return Padding(
-          padding: const EdgeInsetsDirectional.only(end: 6),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ShopProfilePage()),
-                );
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircleAvatar(
-                      radius: 12,
-                      backgroundColor: primary.withOpacity(.15),
-                      backgroundImage:
-                      (logo != null && logo!.isNotEmpty) ? NetworkImage(logo!) : null,
-                      child: (logo == null || logo!.isEmpty)
-                          ? Icon(Icons.store, color: primary, size: 16)
-                          : null,
-                    ),
-                    const SizedBox(height: 2),
-                    SizedBox(
-                      width: 80,
-                      child: Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                            fontSize: 11, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

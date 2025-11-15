@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import 'dashboard_page.dart';
 import 'customer_messages_pages.dart';
@@ -140,7 +141,7 @@ class _ReportsPageState extends State<ReportsPage> {
               }
               final int sumStatuses = p + c + comp + canc;
 
-              // ---- Top selling ----
+              // 🚀 التعديل: تجميع المنتجات حسب ID
               final Map<String, _TopItem> topMap = {};
               for (final d in docs) {
                 final m = d.data() as Map<String, dynamic>;
@@ -148,18 +149,23 @@ class _ReportsPageState extends State<ReportsPage> {
                 if (st != 'completed' && st != 'confirmed') continue;
                 if (m['items'] is! List) continue;
                 for (final it in (m['items'] as List)) {
-                  final name =
-                  (it['name'] ?? it['title'] ?? 'Unnamed').toString();
+                  // 💡 جلب Product ID (للحصول على الصورة والاسم الحديث)
+                  final productId = (it['productId'] ?? it['id'] ?? '').toString();
+                  if (productId.isEmpty) continue;
+
+                  // 💡 جلب الاسم القديم (كاسم احتياطي)
+                  final name = (it['name'] ?? it['title'] ?? 'Unnamed').toString();
                   final qty = (it['qty'] ?? it['quantity'] ?? 1) as num;
-                  final img = (it['image'] ?? it['imageUrl'] ?? '') as String;
-                  topMap.putIfAbsent(name, () => _TopItem(name, img, 0));
-                  topMap[name] =
-                      topMap[name]!.copyWith(qty: topMap[name]!.qty + qty);
+
+                  // استخدام الـ ID كمفتاح في الـ Map
+                  topMap.putIfAbsent(productId, () => _TopItem(productId, name, 0));
+                  topMap[productId] = topMap[productId]!.copyWith(qty: topMap[productId]!.qty + qty);
                 }
               }
               final topList = topMap.values.toList()
                 ..sort((a, b) => b.qty.compareTo(a.qty));
               final top3 = topList.take(3).toList();
+
 
               return ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -223,7 +229,6 @@ class _ReportsPageState extends State<ReportsPage> {
                             child: Text('لا توجد بيانات حالات بعد.'),
                           )
                               : Center(
-                            // ⬅️ تأكدنا من مساحة مربّعة للرسم
                             child: AspectRatio(
                               aspectRatio: 1,
                               child: CustomPaint(
@@ -273,29 +278,8 @@ class _ReportsPageState extends State<ReportsPage> {
                     child: Column(
                       children: [
                         for (final t in top3)
-                          ListTile(
-                            contentPadding:
-                            const EdgeInsets.symmetric(horizontal: 8),
-                            leading: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: (t.image?.isNotEmpty == true)
-                                  ? Image.network(t.image!,
-                                  width: 44,
-                                  height: 44,
-                                  fit: BoxFit.cover)
-                                  : Container(
-                                width: 44,
-                                height: 44,
-                                color: const Color(0xFFF1F5F9),
-                                child: const Icon(
-                                    Icons.image_not_supported_outlined),
-                              ),
-                            ),
-                            title: Text(t.name,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600)),
-                            subtitle: Text('${t.qty} units sold'),
-                          ),
+                        // ✅ استخدام الـ Widget الجديد لجلب الاسم والصورة الحديثين
+                          _TopProductTile(topItem: t, cleanUrlHelper: _cleanUrl),
                         if (top3.isEmpty)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 16),
@@ -341,7 +325,99 @@ class _ReportsPageState extends State<ReportsPage> {
   }
 }
 
-// ====== Painters ======
+// ====== Painters, UI helpers, and Models ======
+
+// 💡 الكلاس الجديد الذي يجلب البيانات الحديثة
+class _TopProductTile extends StatelessWidget {
+  const _TopProductTile({required this.topItem, required this.cleanUrlHelper});
+  final _TopItem topItem;
+  final String Function(String?) cleanUrlHelper;
+
+  // 🚀 الدالة تجلب الاسم والصورة الحديثين
+  Future<Map<String, String?>> _fetchCurrentData() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('products')
+          .doc(topItem.productId)
+          .get();
+
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+
+        // جلب الاسم الحديث، الاحتياطي هو الاسم القديم
+        final name = (data['name'] ?? data['title'] ?? topItem.name).toString();
+
+        // جلب الصورة الحديثة
+        final img = (data['product-images'] ?? data['imageUrl'] ?? data['image'] ?? data['productImage'] ?? data['photoUrl'] ?? '') as String?;
+
+        return {'name': name, 'image': img};
+      }
+      // إذا لم يتم العثور على الوثيقة، نرجع الاسم القديم والصورة null
+      return {'name': topItem.name, 'image': null};
+    } catch (e) {
+      debugPrint('Error fetching live product data for ${topItem.productId}: $e');
+      return {'name': topItem.name, 'image': null};
+    }
+  }
+
+  // دالة مساعدة لتقليل تكرار كود Placeholder
+  Widget _buildPlaceholder(IconData? icon, {bool loading = false}) {
+    return Container(
+      width: 44,
+      height: 44,
+      color: const Color(0xFFF1F5F9),
+      child: Center(
+        child: loading
+            ? const SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        )
+            : Icon(icon, color: Colors.black54),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, String?>>(
+      future: _fetchCurrentData(),
+      builder: (context, snapshot) {
+
+        // 🚀 استخدام الاسم الحديث (أو القديم كاحتياطي)
+        final currentName = snapshot.data?['name'] ?? topItem.name;
+        // 🚀 استخدام الصورة الحديثة
+        final imageUrl = cleanUrlHelper(snapshot.data?['image']);
+
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: (imageUrl.isNotEmpty)
+                ? Image.network(
+              imageUrl,
+              width: 44,
+              height: 44,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _buildPlaceholder(Icons.broken_image_outlined),
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) return child;
+                return _buildPlaceholder(null, loading: true);
+              },
+            )
+                : _buildPlaceholder(Icons.image_not_supported_outlined),
+          ),
+          title: Text(currentName, style: const TextStyle(fontWeight: FontWeight.w600)),
+          subtitle: Text('${topItem.qty} units sold'),
+          trailing: snapshot.connectionState == ConnectionState.waiting
+              ? const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 2))
+              : null,
+        );
+      },
+    );
+  }
+}
+
 
 class _LineChartPainter extends CustomPainter {
   _LineChartPainter({required this.data, this.strokeColor = Colors.teal});
@@ -442,8 +518,6 @@ class _DonutChartPainter extends CustomPainter {
       old.values != values || old.colors != colors || old.strokeWidth != strokeWidth;
 }
 
-// ===== UI helpers =====
-
 class _StatBigCard extends StatelessWidget {
   const _StatBigCard({
     required this.leading,
@@ -538,13 +612,14 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
+// 💡 تم التعديل: يحمل الآن productId والاسم القديم كاسم احتياطي
 class _TopItem {
-  final String name;
-  final String? image;
+  final String productId;
+  final String name; // الاسم القديم (كاحتياطي)
   final num qty;
-  _TopItem(this.name, this.image, this.qty);
-  _TopItem copyWith({String? name, String? image, num? qty}) =>
-      _TopItem(name ?? this.name, image ?? this.image, qty ?? this.qty);
+  _TopItem(this.productId, this.name, this.qty);
+  _TopItem copyWith({String? productId, String? name, num? qty}) =>
+      _TopItem(productId ?? this.productId, name ?? this.name, qty ?? this.qty);
 }
 
 class _StoreHeaderChipSmall extends StatelessWidget {
@@ -582,8 +657,8 @@ class _StoreHeaderChipSmall extends StatelessWidget {
                 CircleAvatar(
                   radius: 12,
                   backgroundColor: primary.withOpacity(.15),
-                  backgroundImage: (logo != null && logo!.isNotEmpty) ? NetworkImage(logo!) : null,
-                  child: (logo == null || logo!.isEmpty)
+                  backgroundImage: (logo != null && logo.isNotEmpty) ? NetworkImage(logo) : null,
+                  child: (logo == null || logo.isEmpty)
                       ? Icon(Icons.store, color: primary, size: 16)
                       : null,
                 ),
@@ -605,4 +680,16 @@ class _StoreHeaderChipSmall extends StatelessWidget {
       },
     );
   }
+}
+
+// 💡 دالة مساعدة لتنظيف الرابط وإضافة البروتوكول
+String _cleanUrl(String? url) {
+  if (url == null || url.isEmpty) return '';
+  String cleaned = url.trim();
+  // التأكد من أن الرابط يبدأ بـ http/https
+  if (cleaned.isNotEmpty && !cleaned.startsWith('http')) {
+    // يمكن أن يكون الرابط بدون البروتوكول في بعض قواعد البيانات، لذا نضيف https
+    return 'https://$cleaned';
+  }
+  return cleaned;
 }

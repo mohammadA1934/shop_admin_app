@@ -1,14 +1,87 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart'; // 💡 لإتاحة kDebugMode
 
 import 'dashboard_page.dart';
 import 'shop_profile_page.dart';
-import 'reports_page.dart' as rp; // ⬅️ لفتح صفحة التقارير
+import 'reports_page.dart' as rp;
 
 /// ألوان عامة
 const _kPrimary = Color(0xFF2ECC95);
 const _bubbleMe = Color(0xFFE6F8F1);
+
+// =======================================================================
+// 💡 الدالة المصححة التي تقطع الإيميل قبل علامة @
+// =======================================================================
+String _cleanUserName(String rawName) {
+  if (rawName.isEmpty) return 'Customer';
+
+  final name = rawName.trim();
+
+  // 1. التحقق من وجود @
+  if (name.contains('@')) {
+    // 2. اقتطاع الجزء الأول
+    final atIndex = name.indexOf('@');
+    final extractedName = name.substring(0, atIndex);
+
+    // 3. التحقق مما إذا كان الجزء المقتطع فارغاً
+    if (extractedName.isNotEmpty) {
+      return extractedName;
+    }
+  }
+
+  // 4. إذا لم يكن إيميلاً، نرجع الاسم كما هو
+  return name;
+}
+// =======================================================================
+
+// =======================================================================
+// 🎯 دالة جلب الاسم والصورة المحدثة من مجموعة USERS
+// =======================================================================
+Future<Map<String, String>> _fetchCustomerData(String uid, String fallbackName) async {
+
+  String name = _cleanUserName(fallbackName);
+  String avatar = ''; // قيمة مبدئية فارغة للصورة
+
+  // إذا لم يكن لدينا UID، نستخدم الاسم المستعار كحل سريع
+  if (uid.isEmpty) return {'name': name, 'avatar': avatar};
+
+  try {
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users') // المجموعة التي تحتوي على بيانات المستخدم
+        .doc(uid)
+        .get(const GetOptions(source: Source.serverAndCache));
+
+    if (userDoc.exists) {
+      final data = userDoc.data() as Map<String, dynamic>?;
+
+      // 1. تحديد الاسم (الأولوية: name, displayName, email)
+      final nameOrEmail = data?['name'] ?? data?['displayName'] ?? data?['email'];
+
+      // 2. تحديد رابط الصورة (الأولوية: photoUrl, avatarUrl)
+      final avatarUrl = data?['photoUrl'] ?? data?['avatarUrl'] ?? '';
+
+      if (nameOrEmail != null && nameOrEmail.toString().isNotEmpty) {
+        final nameString = nameOrEmail.toString();
+        // قص الإيميل إذا وجد
+        name = nameString.contains('@') ? nameString.split('@').first : nameString;
+      }
+
+      // جلب رابط الصورة إذا وجد
+      if (avatarUrl.isNotEmpty) {
+        avatar = avatarUrl.toString();
+      }
+    }
+  } catch (e) {
+    if (kDebugMode) debugPrint('Error fetching user profile for $uid: $e');
+  }
+
+  return {'name': name, 'avatar': avatar};
+}
+// =======================================================================
+
 
 /// محول آمن لأي قيمة إلى int (يدعم int/bool/num/String)
 int _asInt(dynamic v) {
@@ -28,12 +101,14 @@ class CustomerMessagesIndexPage extends StatelessWidget {
   void _onBottomTap(BuildContext context, int i) {
     if (i == 0) {
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const DashboardPage()),
+        // ✅ تم إزالة const
+        MaterialPageRoute(builder: (_) => DashboardPage()),
             (_) => false,
       );
     } else if (i == 2) {
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const rp.ReportsPage()),
+        // ✅ تم إزالة const
+        MaterialPageRoute(builder: (_) => rp.ReportsPage()),
       );
     }
   }
@@ -43,10 +118,8 @@ class CustomerMessagesIndexPage extends StatelessWidget {
     final convosQuery = FirebaseFirestore.instance
         .collection('conversations')
         .where('storeId', isEqualTo: storeId)
-    // ✅ استخدم الحقول المتوافقة مع القواعد
         .orderBy('lastMessageAt', descending: true);
 
-    // نسمع مع metadata لنتجنب فترات “الفراغ” المؤقتة
     final convos = convosQuery.snapshots(includeMetadataChanges: true);
 
     return Scaffold(
@@ -65,7 +138,6 @@ class CustomerMessagesIndexPage extends StatelessWidget {
       body: StreamBuilder<QuerySnapshot>(
         stream: convos,
         builder: (context, s) {
-          // 👇 عرض أي أخطاء (مثل نقص index أو صلاحيات)
           if (s.hasError) {
             return _ErrorCard(
               title: 'تشخيص محتمل:',
@@ -94,72 +166,79 @@ class CustomerMessagesIndexPage extends StatelessWidget {
             itemBuilder: (context, i) {
               final d = docs[i];
               final data = d.data() as Map<String, dynamic>;
-              final name = (data['userName'] ?? 'Customer') as String;
-              final avatar = (data['userAvatar'] ?? '') as String;
-              // توافقية: دعم حقول قديمة إن وُجدت
-              final lastText =
-              (data['lastMessageText'] ?? data['lastText'] ?? '') as String;
-              final lastTs =
-              ((data['lastMessageAt'] ?? data['lastTimestamp']) as Timestamp?)
-                  ?.toDate();
-              // ✅ التحويل الآمن بدل cast مباشر لـ int
+
+              // 🎯 1. نحدد الـ UID والاسم المستعار (حسب ما ظهر في Firebase)
+              // تم تعديل ترتيب البحث ليناسب 'customerUid' بالتهجئة الصحيحة.
+              final customerUid = (data['customerUid'] ?? data['customerUID'] ?? data['userId'] ?? data['customerId'] ?? '') as String;
+              final rawName = (data['userName'] ?? data['customerName'] ?? 'Customer') as String; // نأخذ الاسم المستعار
+              final avatar = (data['userAvatar'] ?? '') as String; // الصورة القديمة المخزنة في المحادثة
+
+              final lastText = (data['lastMessageText'] ?? data['lastText'] ?? '') as String;
+              final lastTs = ((data['lastMessageAt'] ?? data['lastTimestamp']) as Timestamp?)?.toDate();
               final unread = _asInt(data['unreadForStore']);
 
-              return ListTile(
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                tileColor: Colors.white,
-                leading: CircleAvatar(
-                  backgroundImage:
-                  avatar.isNotEmpty ? NetworkImage(avatar) : null,
-                  child: avatar.isEmpty ? const Icon(Icons.person) : null,
-                ),
-                title:
-                Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text(
-                  lastText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
+              // 💡 استخدام FutureBuilder لجلب الاسم والصورة المحدثة من وثيقة المستخدم (USERS)
+              return FutureBuilder<Map<String, String>>(
+                future: _fetchCustomerData(customerUid, rawName), // ⬅️ استدعاء الدالة الجديدة
+                builder: (context, snapshot) {
+                  // الاسم المحدث (أو الاسم المستعار إذا فشل الجلب)
+                  final name = snapshot.data?['name'] ?? _cleanUserName(rawName);
+                  // الصورة المحدثة (أو الصورة القديمة المخزنة في المحادثة إذا فشل الجلب)
+                  final updatedAvatar = snapshot.data?['avatar'] ?? avatar;
+
+                  // 🚨 سطر التشخيص (يمكن حذفه بعد التأكد)
+                  if (kDebugMode) debugPrint('Conversation ${d.id}: UID=$customerUid, FetchedName=$name, FetchedAvatar=$updatedAvatar');
+
+                  return ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(
+                        color: unread > 0
+                            ? const Color(0xFFFEE700)
+                            : Colors.transparent,
+                      ),
+                    ),
+                    tileColor: Colors.white,
+                    leading: Badge.count(
+                      isLabelVisible: unread > 0,
+                      count: unread,
+                      backgroundColor: const Color(0xFFFEE700),
+                      textColor: Colors.black,
+                      child: CircleAvatar(
+                        backgroundImage:
+                        // 💡 استخدام الصورة المحدثة
+                        updatedAvatar.isNotEmpty ? NetworkImage(updatedAvatar) : null,
+                        child: updatedAvatar.isEmpty ? const Icon(Icons.person) : null,
+                      ),
+                    ),
+                    title: Text(
+                      name, // ⬅️ الآن يتم عرض الاسم المقطوع
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      lastText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: Text(
                       _timeAgo(lastTs),
                       style: const TextStyle(fontSize: 12, color: Colors.black54),
                     ),
-                    if (unread > 0) ...[
-                      const SizedBox(height: 6),
-                      Container(
-                        padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.redAccent,
-                          borderRadius: BorderRadius.circular(30),
+                    onTap: () {
+                      // نرسل الاسم والصورة المحدثة إلى صفحة الدردشة
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => CustomerChatPage(
+                            storeId: storeId,
+                            conversationId: d.id,
+                            userName: name,
+                            userAvatar: updatedAvatar, // ⬅️ إرسال الصورة المحدثة
+                          ),
                         ),
-                        child: Text(
-                          unread.toString(),
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => CustomerChatPage(
-                        storeId: storeId,
-                        conversationId: d.id,
-                        userName: name,
-                        userAvatar: avatar,
-                      ),
-                    ),
+                      );
+                    },
                   );
                 },
               );
@@ -199,8 +278,8 @@ class CustomerChatPage extends StatefulWidget {
     super.key,
     required this.storeId,
     required this.conversationId,
-    required this.userName,
-    required this.userAvatar,
+    required this.userName, // ✅ هذا الاسم هو الآن الاسم المعالج (بدون @)
+    required this.userAvatar, // ✅ هذه الصورة هي الصورة المحدثة
   });
 
   final String storeId;
@@ -261,12 +340,14 @@ class _CustomerChatPageState extends State<CustomerChatPage> {
   void _onBottomTap(int i) {
     if (i == 0) {
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const DashboardPage()),
+        // ✅ تم إزالة const
+        MaterialPageRoute(builder: (_) => DashboardPage()),
             (_) => false,
       );
     } else if (i == 2) {
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const rp.ReportsPage()),
+        // ✅ تم إزالة const
+        MaterialPageRoute(builder: (_) => rp.ReportsPage()),
       );
     }
   }
@@ -290,6 +371,7 @@ class _CustomerChatPageState extends State<CustomerChatPage> {
           children: [
             CircleAvatar(
               radius: 14,
+              backgroundColor: Colors.white, // إضافة خلفية بيضاء
               backgroundImage: widget.userAvatar.isNotEmpty
                   ? NetworkImage(widget.userAvatar)
                   : null,
@@ -298,6 +380,7 @@ class _CustomerChatPageState extends State<CustomerChatPage> {
                   : null,
             ),
             const SizedBox(width: 8),
+            // ✅ يتم عرض الاسم المعالج (بدون @) هنا
             Text(widget.userName, style: const TextStyle(fontSize: 16)),
           ],
         ),
@@ -545,8 +628,9 @@ class _StoreHeaderChipSmall extends StatelessWidget {
           child: InkWell(
             borderRadius: BorderRadius.circular(10),
             onTap: () {
+              // ✅ تم إزالة const
               Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const ShopProfilePage()));
+                  .push(MaterialPageRoute(builder: (_) => ShopProfilePage()));
             },
             child: chip,
           ),

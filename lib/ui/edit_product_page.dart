@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'dashboard_page.dart';
 import 'shop_profile_page.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 // ✅ إضافات للتنقل من الـ bottom bar
 import 'customer_messages_pages.dart';
@@ -86,17 +87,36 @@ class _EditProductPageState extends State<EditProductPage> {
   Future<void> _pickImage() async {
     try {
       final picker = ImagePicker();
-      final x = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+      final x = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+      );
+
       if (x != null) {
-        setState(() => _newImageFile = File(x.path));
+        print('✅ تم اختيار الصورة: ${x.path}');
+        setState(() {
+          _newImageFile = File(x.path);
+          print('🟢 تم تحديث الصورة في setState');
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم اختيار الصورة بنجاح ✅')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('لم يتم اختيار أي صورة')),
+        );
       }
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('تعذر اختيار الصورة')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('حدث خطأ أثناء اختيار الصورة: $e')),
+      );
     }
   }
 
+
+  // ✅ تم تعديل هذه الدالة فقط (رفع الصورة إلى Supabase عند التعديل)
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
@@ -115,6 +135,39 @@ class _EditProductPageState extends State<EditProductPage> {
     };
 
     try {
+      // ✅ رفع الصورة الجديدة إلى Supabase فقط إذا المستخدم اختار صورة جديدة
+      if (_newImageFile != null) {
+        final supabase = Supabase.instance.client;
+        final bucket = supabase.storage.from('product-images');
+
+        final fileName =
+            '${widget.storeId}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+        // ارفع الملف فعليًا — تمرير File(...) للتأكد
+        await bucket.upload(
+          fileName,
+          File(_newImageFile!.path),
+          fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
+        );
+
+        // جلب الرابط العام للصورة المرفوعة
+        final publicUrl = bucket.getPublicUrl(fileName);
+
+        if (publicUrl == null || publicUrl.isEmpty) {
+          throw Exception('تعذر الحصول على رابط الصورة من Supabase');
+        }
+
+        // أضف رابط الصورة للتحديث
+        update['imageUrl'] = publicUrl;
+
+        // عرض الصورة فورًا في الواجهة (بدون الخروج من الصفحة)
+        setState(() {
+          _currentImageUrl = publicUrl;
+          _newImageFile = null; // نفضّل تنظيف المؤقت لأننا نعرض الصورة من URL
+        });
+      }
+
+      // ✅ تحديث بيانات المنتج في Firestore
       await FirebaseFirestore.instance
           .collection('products')
           .doc(widget.productId)
@@ -122,12 +175,13 @@ class _EditProductPageState extends State<EditProductPage> {
 
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('تم حفظ التغييرات')));
-      Navigator.pop(context);
-    } catch (_) {
+          .showSnackBar(const SnackBar(content: Text('تم حفظ التغييرات ✅')));
+
+      // ملاحظة: لا نغلق الصفحة هنا لكي تظهر الصورة المحدثة مباشرة (تم عرضها أعلاه)
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('تعذر الحفظ، حاول لاحقًا')));
+          .showSnackBar(SnackBar(content: Text('تعذر الحفظ: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -141,14 +195,12 @@ class _EditProductPageState extends State<EditProductPage> {
             (_) => false,
       );
     } else if (i == 1) {
-      // Inbox → صفحة المحادثات
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => CustomerMessagesIndexPage(storeId: widget.storeId),
         ),
       );
     } else if (i == 2) {
-      // Reports → صفحة التقارير
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const rp.ReportsPage()),
       );
