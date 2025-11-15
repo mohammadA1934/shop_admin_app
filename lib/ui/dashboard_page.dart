@@ -20,6 +20,13 @@ import 'customer_messages_pages.dart';
 // ✅ صفحة التقارير الحقيقية
 import 'reports_page.dart' as rp;
 
+// ✅ استيراد صفحة الكوبونات الجديدة
+import 'coupons_list_page.dart';
+
+// 🛑 الاستيراد الافتراضي لصفحة الضريبة (إذا كانت في ملف منفصل)
+// import 'store_tax_settings_page.dart';
+// (تم وضع الكلاس في نهاية هذا الملف لتجنب مشاكل الاستيراد)
+
 
 /// الـ Dashboard مع الـ Bottom Navigation
 class DashboardPage extends StatefulWidget {
@@ -109,8 +116,9 @@ class _DashboardHomeState extends State<_DashboardHome> {
   @override
   void initState() {
     super.initState();
-    _ticker = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) setState(() {}); // يحدّث عدّ العروض حسب الوقت الحالي
+    // يحدّث عدّ العروض/الكوبونات حسب الوقت الحالي كل دقيقة
+    _ticker = Timer.periodic(const Duration(minutes: 1), (timer) {
+      if (mounted) setState(() {});
     });
   }
 
@@ -193,20 +201,32 @@ class _DashboardHomeState extends State<_DashboardHome> {
             .where('status', isEqualTo: 'pending')
             .snapshots();
 
-        // ✅ عدّ العروض النشطة: شرط endAt >= now في الاستعلام،
-        // ثم نفلتر startAt <= now على الكلاينت.
+        // عدّ العروض النشطة
         final promotionsStream = FirebaseFirestore.instance
             .collection('promotions')
             .where('storeId', isEqualTo: storeId)
             .where('endAt', isGreaterThanOrEqualTo: Timestamp.now())
             .snapshots();
 
-        // ✅ عدّ المحادثات غير المقروءة للمتجر
+        // عدّ المحادثات غير المقروءة للمتجر
         final unreadConversationsStream = FirebaseFirestore.instance
             .collection('conversations')
             .where('storeId', isEqualTo: storeId)
             .where('unreadForStore', isGreaterThan: 0)
             .snapshots();
+
+        // Stream الكوبونات النشطة - يجلب كل الكوبونات لفلترتها في Dart
+        final couponsStream = FirebaseFirestore.instance
+            .collection('coupons')
+            .where('storeId', isEqualTo: storeId)
+            .snapshots();
+
+        // 🛑 Stream جلب قيمة الضريبة (نحتاج إلى DocSnapshot لنفس المتجر)
+        final taxStream = FirebaseFirestore.instance
+            .collection('shops')
+            .doc(storeId)
+            .snapshots();
+
 
         return Scaffold(
           appBar: AppBar(
@@ -308,6 +328,82 @@ class _DashboardHomeState extends State<_DashboardHome> {
               ),
               const SizedBox(height: 12),
 
+              // Active Coupons - تطبيق منطق الفلترة الكاملة في Dart
+              StreamBuilder<QuerySnapshot>(
+                stream: couponsStream,
+                builder: (context, s) {
+                  int activeCount = 0;
+
+                  if (s.hasData) {
+                    final now = DateTime.now(); // جلب الوقت الحالي بالكامل
+
+                    final docs = s.data!.docs;
+
+                    activeCount = docs.where((d) {
+                      final m = d.data() as Map<String, dynamic>;
+                      final tsStart = m['startAt'] as Timestamp?;
+                      final tsEnd = m['endAt'] as Timestamp?;
+
+                      // 1. تعريف وقت البداية والنهاية
+                      final start = tsStart?.toDate() ?? DateTime(1900); // تاريخ قديم إذا لم يحدد
+                      final end = tsEnd?.toDate() ?? DateTime(9999); // تاريخ بعيد إذا لم يحدد
+
+                      // 2. الشرط النهائي: يجب أن يكون الوقت الحالي ليس قبل البداية (بدأ) AND ليس بعد النهاية (لم ينتهِ).
+                      return !now.isBefore(start) && !now.isAfter(end);
+                    }).length;
+                  }
+
+                  return _StatCard(
+                    title: 'Active Coupons',
+                    subtitle: 'Create & manage codes',
+                    value: '$activeCount',
+                    color: const Color(0xFFC7C7FF),
+                    leadingIcon: Icons.discount_outlined,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => CouponsListPage(storeId: storeId),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // 🛑 التعديل الثالث: Store Taxes Card
+              StreamBuilder<DocumentSnapshot>(
+                stream: taxStream,
+                builder: (context, s) {
+                  double taxRate = 0.0;
+                  if (s.hasData && s.data!.exists) {
+                    final data = s.data!.data() as Map<String, dynamic>;
+                    // تخزن كـ (0.16) ويتم تحويلها للعرض كـ (16.00)
+                    taxRate = (data['taxRate'] as num? ?? 0.0) * 100;
+                  }
+
+                  final taxDisplay = taxRate.toStringAsFixed(taxRate == taxRate.toInt() ? 0 : 2);
+
+                  return _StatCard(
+                    title: 'Store Taxes',
+                    subtitle: 'Set store-wide tax rate',
+                    value: '$taxDisplay%', // عرض النسبة المئوية
+                    color: const Color(0xFFC4DFFF), // لون أزرق فاتح جديد
+                    leadingIcon: Icons.percent,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          // الانتقال للصفحة الجديدة
+                          builder: (_) => StoreTaxSettingsPage(storeId: storeId),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 12),
+
+
               // Customer Messages (عدد غير المقروء)
               StreamBuilder<QuerySnapshot>(
                 stream: unreadConversationsStream,
@@ -380,6 +476,7 @@ class _DashboardHomeState extends State<_DashboardHome> {
   );
 }
 
+// الكلاسات المساعدة (تبقى كما هي)
 class _StoreHeaderChip extends StatelessWidget {
   const _StoreHeaderChip();
 
@@ -425,8 +522,8 @@ class _StoreHeaderChip extends StatelessWidget {
                       CircleAvatar(
                         radius: 12,
                         backgroundColor: primary.withOpacity(.15),
-                        backgroundImage: (logo != null && logo!.isNotEmpty) ? NetworkImage(logo!) : null,
-                        child: (logo == null || logo!.isEmpty)
+                        backgroundImage: (logo != null && logo.isNotEmpty) ? NetworkImage(logo) : null,
+                        child: (logo == null || logo.isEmpty)
                             ? Icon(Icons.store, color: primary, size: 16)
                             : null,
                       ),
@@ -565,7 +662,7 @@ class _OrderActivityTile extends StatelessWidget {
   }
 }
 
-// Placeholders القديمة تبقى كما هي بالأسفل
+// Placeholders (تبقى كما هي)
 class OrdersPage extends StatelessWidget {
   const OrdersPage({super.key, required this.storeId});
   final String storeId;
@@ -604,6 +701,168 @@ class ReportsPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Reports')),
       body: const Center(child: Text('Reports')),
+    );
+  }
+}
+
+
+// =========================================================================
+// 🛑 الكلاس الجديد: StoreTaxSettingsPage
+// =========================================================================
+
+class StoreTaxSettingsPage extends StatefulWidget {
+  const StoreTaxSettingsPage({super.key, required this.storeId});
+  final String storeId;
+
+  @override
+  State<StoreTaxSettingsPage> createState() => _StoreTaxSettingsPageState();
+}
+
+class _StoreTaxSettingsPageState extends State<StoreTaxSettingsPage> {
+  final TextEditingController _taxController = TextEditingController();
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  bool _isLoading = false;
+
+  static const kPrimary = Color(0xFF2ECC95); // استخدام لون التطبيق الأساسي
+
+  // جلب قيمة الضريبة الحالية
+  Future<void> _fetchTaxRate() async {
+    setState(() => _isLoading = true);
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('shops')
+          .doc(widget.storeId)
+          .get();
+
+      final data = doc.data();
+      // يتم تخزينها كنسبة (0.16) ونعرضها كنسبة مئوية (16)
+      final rate = (data?['taxRate'] as num? ?? 0.0) * 100;
+      _taxController.text = rate.toStringAsFixed(rate == rate.toInt() ? 0 : 2);
+    } catch (e) {
+      // إظهار رسالة خطأ
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load tax rate: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // حفظ قيمة الضريبة
+  Future<void> _saveTaxRate() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final ratePercentage = double.parse(_taxController.text);
+      // نحول القيمة المدخلة (16) إلى نسبة (0.16) قبل الحفظ
+      final taxRate = ratePercentage / 100.0;
+
+      await FirebaseFirestore.instance
+          .collection('shops')
+          .doc(widget.storeId)
+          .update({'taxRate': taxRate});
+
+      // إظهار رسالة نجاح
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tax rate updated successfully!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save tax rate: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTaxRate();
+  }
+
+  @override
+  void dispose() {
+    _taxController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Store Taxes and Fees'),
+        backgroundColor: Colors.white,
+        elevation: 0.3,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Set your store-wide tax rate. This percentage will be applied to all product totals at checkout.',
+                style: TextStyle(fontSize: 14, color: Colors.black54),
+              ),
+              const SizedBox(height: 20),
+
+              TextFormField(
+                controller: _taxController,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(
+                  labelText: 'Tax Rate',
+                  hintText: 'e.g., 16',
+                  suffixText: '% (Percentage)',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter a tax rate.';
+                  }
+                  final rate = double.tryParse(value);
+                  if (rate == null || rate < 0 || rate > 100) {
+                    return 'Please enter a valid percentage (0-100).';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 30),
+
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _saveTaxRate,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: kPrimary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: _isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text(
+                    'Save Tax Rate',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

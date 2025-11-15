@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 // صفحة تغيير كلمة السر اللي أنشأناها سابقًا
 import 'change_password_page.dart';
+// 🛑 استيراد صفحة إعداد ساعات العمل الجديدة
+import 'working_hours_settings_page.dart';
 
 class ShopProfilePage extends StatefulWidget {
   const ShopProfilePage({super.key});
@@ -25,9 +27,12 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
   final _nameCtrl = TextEditingController();     // للعرض فقط (readOnly)
   final _emailCtrl = TextEditingController();    // readOnly
   final _descCtrl = TextEditingController();
-  final _hoursCtrl = TextEditingController();
+  // 🛑 تم حذف: final _hoursCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+
+  // 🛑 متغير لحالة أوقات العمل ليعرض في الواجهة (للعرض فقط)
+  String _workingHoursDisplay = 'Loading...';
 
   bool _loading = false;
   bool _loadedOnce = false; // لتعبئة الحقول مرة واحدة من الداتا
@@ -37,7 +42,7 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _descCtrl.dispose();
-    _hoursCtrl.dispose();
+    // 🛑 تم حذف: _hoursCtrl.dispose();
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
     super.dispose();
@@ -49,6 +54,7 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
     required String hint,
     IconData? icon,
     Widget? suffix,
+    bool readOnly = false, // لتحديد نمط القراءة فقط
   }) {
     return InputDecoration(
       hintText: hint,
@@ -58,7 +64,8 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
       prefixIcon: icon != null ? Icon(icon, color: kHint) : null,
       suffixIcon: suffix,
       filled: true,
-      fillColor: Colors.white,
+      // 🛑 تغيير اللون إذا كان readOnly
+      fillColor: readOnly ? Colors.grey.shade50 : Colors.white,
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: kBorder),
@@ -78,15 +85,30 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
     );
   }
 
+  // 🛑 دالة مساعدة لتنسيق العرض الحالي لأوقات العمل (في حالة التحميل)
+  String _getWorkingHoursDisplay(Map<String, dynamic>? workingHours) {
+    if (workingHours == null || workingHours.isEmpty) {
+      return 'Not set. Tap to configure.';
+    }
+    // عرض بسيط لأوقات الأسبوع (مثال: Mon-Fri: 9:00 - 17:00)
+    final mon = workingHours['Mon'] as Map<String, dynamic>?;
+    final sun = workingHours['Sun'] as Map<String, dynamic>?;
+
+    if (mon != null && sun != null) {
+      return 'Mon-Sun: ${mon['start']} - ${mon['end']} (tap to edit)';
+    }
+    return 'Hours configured. Tap to view/edit.';
+  }
+
+
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() => _loading = true);
     try {
       await FirebaseFirestore.instance.collection('shops').doc(_uid).set({
-        // الاسم والإيميل يقرأان من التسجيل، ما نعدّل عليهم هنا
         'description': _descCtrl.text.trim(),
-        'hours': _hoursCtrl.text.trim(),
+        // 🛑 تم حذف: 'hours': _hoursCtrl.text.trim(),
         'phone': _phoneCtrl.text.trim(),
         'address': _addressCtrl.text.trim(),
         'updatedAt': Timestamp.now(),
@@ -96,7 +118,8 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تحديث البيانات بنجاح ✅')),
       );
-      Navigator.of(context).maybePop();
+      // لا تغلق الصفحة لتسمح للمستخدم بتعديل الأوقات فورًا
+      // Navigator.of(context).maybePop();
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -144,12 +167,16 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
 
             final data = (snap.data?.data() ?? {}) as Map<String, dynamic>;
 
+            // 🛑 تحديث عرض أوقات العمل في الواجهة بناءً على الداتا المجلوبة
+            final workingHours = data['workingHours'] as Map<String, dynamic>?;
+            _workingHoursDisplay = _getWorkingHoursDisplay(workingHours);
+
             // مرّة واحدة فقط نعبيّ الكنترولرز من الداتا
             if (!_loadedOnce) {
               _nameCtrl.text = (data['name'] as String?) ?? '';
               _emailCtrl.text = (data['email'] as String?) ?? (FirebaseAuth.instance.currentUser?.email ?? '');
               _descCtrl.text = (data['description'] as String?) ?? '';
-              _hoursCtrl.text = (data['hours'] as String?) ?? '';
+              // 🛑 تم حذف تعبئة _hoursCtrl.text
               _phoneCtrl.text = (data['phone'] as String?) ?? '';
               _addressCtrl.text = (data['address'] as String?) ?? '';
               _loadedOnce = true;
@@ -211,6 +238,7 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                         decoration: _dec(
                           hint: 'Store Name',
                           icon: Icons.store_outlined,
+                          readOnly: true, // نمط القراءة فقط
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -242,6 +270,7 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                         decoration: _dec(
                           hint: 'Email',
                           icon: Icons.email_outlined,
+                          readOnly: true, // نمط القراءة فقط
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -256,12 +285,35 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                       ),
                       const SizedBox(height: 14),
 
-                      // Working Hours
+                      // 🛑 Working Hours (الآن هو زر/مؤشر بدل حقل نص)
                       const Text('Working Hours', style: TextStyle(color: kText)),
                       const SizedBox(height: 6),
-                      TextFormField(
-                        controller: _hoursCtrl,
-                        decoration: _dec(hint: 'e.g. 9 AM - 9 PM', icon: Icons.calendar_today_outlined),
+
+                      // 🛑 استخدام InkWell مع InputDecorator ليكون شكله كحقل نص لكنه زر
+                      InkWell(
+                        onTap: () async {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => WorkingHoursSettingsPage(storeId: _uid),
+                            ),
+                          );
+                          // لا نحتاج لـ setState لأن الـ StreamBuilder سيقوم بتحديث نفسه
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: InputDecorator(
+                          decoration: _dec(
+                            hint: 'Set Hours',
+                            icon: Icons.calendar_today_outlined,
+                            suffix: const Icon(Icons.edit, color: kPrimary, size: 20),
+                          ),
+                          child: Text(
+                            _workingHoursDisplay,
+                            style: TextStyle(
+                              color: workingHours == null ? kHint : kText,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 14),
 

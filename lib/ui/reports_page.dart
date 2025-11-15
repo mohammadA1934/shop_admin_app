@@ -133,8 +133,9 @@ class _ReportsPageState extends State<ReportsPage> {
               for (final d in docs) {
                 final m = d.data() as Map<String, dynamic>;
                 final st = (m['status'] ?? '').toString().toLowerCase();
-                if (st == 'pending') p++;
-                else if (st == 'confirmed') c++;
+                if (st == 'pending') {
+                  p++;
+                } else if (st == 'confirmed') c++;
                 else if (st == 'completed') comp++;
                 else if (st == 'canceled' || st == 'cancelled') canc++;
               }
@@ -582,8 +583,8 @@ class _StoreHeaderChipSmall extends StatelessWidget {
                 CircleAvatar(
                   radius: 12,
                   backgroundColor: primary.withOpacity(.15),
-                  backgroundImage: (logo != null && logo!.isNotEmpty) ? NetworkImage(logo!) : null,
-                  child: (logo == null || logo!.isEmpty)
+                  backgroundImage: (logo != null && logo.isNotEmpty) ? NetworkImage(logo) : null,
+                  child: (logo == null || logo.isEmpty)
                       ? Icon(Icons.store, color: primary, size: 16)
                       : null,
                 ),
