@@ -1,5 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart'; // 💡 لإتاحة kDebugMode
@@ -603,8 +602,8 @@ class _StoreHeaderChipSmall extends StatelessWidget {
               radius: 12,
               backgroundColor: primary.withOpacity(.15),
               backgroundImage:
-              (logo != null && logo!.isNotEmpty) ? NetworkImage(logo!) : null,
-              child: (logo == null || logo!.isEmpty)
+              (logo != null && logo.isNotEmpty) ? NetworkImage(logo) : null,
+              child: (logo == null || logo.isEmpty)
                   ? Icon(Icons.store, color: primary, size: 16)
                   : null,
             ),
