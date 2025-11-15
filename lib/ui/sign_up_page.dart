@@ -308,7 +308,7 @@ class _AdminSignUpPageState extends State<AdminSignUpPage> {
                           .toList();
 
                       return DropdownButtonFormField<String>(
-                        value: _selectedCat,
+                        initialValue: _selectedCat,
                         decoration: _dec(
                           hint: disabled ? 'Loading categories...' : 'Select a category',
                         ),

@@ -28,7 +28,7 @@ class ProductStorage {
     final safeExt = (ext.isEmpty) ? 'png' : ext;
     final id = _sb.auth.currentUser?.id ?? DateTime.now().millisecondsSinceEpoch;
     final ts = DateTime.now().microsecondsSinceEpoch;
-    return 'p_${id}_${ts}.$safeExt';  // <-- هنا المشكلة كانت id_ صارت id
+    return 'p_${id}_$ts.$safeExt';  // <-- هنا المشكلة كانت id_ صارت id
   }
 
 

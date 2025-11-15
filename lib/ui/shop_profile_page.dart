@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'change_password_page.dart';
+// 🛑 استيراد صفحة إعداد ساعات العمل الجديدة
+import 'working_hours_settings_page.dart';
 
 class ShopProfilePage extends StatefulWidget {
   const ShopProfilePage({super.key});
@@ -23,9 +25,12 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
-  final _hoursCtrl = TextEditingController();
+  // 🔥 تم حذف _hoursCtrl نهائياً لأنه لم يعد حقل نص
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+
+  // 🛑 متغير لحالة أوقات العمل ليعرض في الواجهة (للعرض فقط)
+  String _workingHoursDisplay = 'Loading...';
 
   bool _loading = false;
   bool _loadedOnce = false;
@@ -40,7 +45,7 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _descCtrl.dispose();
-    _hoursCtrl.dispose();
+    // 🔥 تم حذف _hoursCtrl.dispose();
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
     super.dispose();
@@ -49,6 +54,8 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
   InputDecoration _dec({
     required String hint,
     IconData? icon,
+    Widget? suffix,
+    bool readOnly = false, // لتحديد نمط القراءة فقط
   }) {
     return InputDecoration(
       hintText: hint,
@@ -57,7 +64,8 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
       prefixIcon: icon != null ? Icon(icon, color: kHint) : null,
       filled: true,
-      fillColor: Colors.white,
+      // 🛑 تغيير اللون إذا كان readOnly
+      fillColor: readOnly ? Colors.grey.shade50 : Colors.white,
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: kBorder),
@@ -101,13 +109,34 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
     }
   }
 
+  // 🛑 دالة مساعدة لتنسيق العرض الحالي لأوقات العمل
+  String _getWorkingHoursDisplay(Map<String, dynamic>? workingHours) {
+    if (workingHours == null || workingHours.isEmpty) {
+      return 'Not set. Tap to configure.';
+    }
+    // عرض بسيط لأوقات الأسبوع (مثال: Mon-Fri: 9:00 - 17:00)
+    final mon = workingHours['Mon'] as Map<String, dynamic>?;
+    final sun = workingHours['Sun'] as Map<String, dynamic>?;
+
+    // محاولة لإعطاء مؤشر عن حالة أوقات العمل
+    if (mon != null && sun != null) {
+      // إذا كانت جميع الأيام متطابقة (فقط كمثال تبسيط)
+      if (mon['start'] == sun['start'] && mon['end'] == sun['end']) {
+        return 'Daily: ${mon['start']} - ${mon['end']} (tap to edit)';
+      }
+      return 'Hours configured. Tap to view/edit.';
+    }
+    return 'Hours configured. Tap to view/edit.';
+  }
+
+
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _loading = true);
     try {
       await FirebaseFirestore.instance.collection('shops').doc(_uid).set({
         'description': _descCtrl.text.trim(),
-        'hours': _hoursCtrl.text.trim(),
+        // 🔥 تم حذف 'hours' من الحفظ
         'phone': _phoneCtrl.text.trim(),
         'address': _addressCtrl.text.trim(),
         'updatedAt': Timestamp.now(),
@@ -116,8 +145,9 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('تم تحديث البيانات بنجاح ✅')));
+      // تم إبقاء النافيجيتور للحالة العادية (يمكن الرجوع للخلف)
       Navigator.of(context).maybePop();
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('حدث خطأ أثناء الحفظ. حاول مجددًا.')));
@@ -141,6 +171,7 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
         centerTitle: true,
       ),
       body: SafeArea(
+        top: false,
         child: StreamBuilder<DocumentSnapshot>(
           stream: shopDocStream,
           builder: (context, snap) {
@@ -150,13 +181,18 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
 
             final data = (snap.data?.data() ?? {}) as Map<String, dynamic>;
 
+            // 🛑 تحديث عرض أوقات العمل في الواجهة بناءً على الداتا المجلوبة
+            final workingHours = data['workingHours'] as Map<String, dynamic>?;
+            _workingHoursDisplay = _getWorkingHoursDisplay(workingHours);
+
+            // مرّة واحدة فقط نعبيّ الكنترولرز من الداتا
             if (!_loadedOnce) {
-              _nameCtrl.text = data['name'] ?? '';
-              _emailCtrl.text = data['email'] ?? '';
-              _descCtrl.text = data['description'] ?? '';
-              _hoursCtrl.text = data['hours'] ?? '';
-              _phoneCtrl.text = data['phone'] ?? '';
-              _addressCtrl.text = data['address'] ?? '';
+              _nameCtrl.text = (data['name'] as String?) ?? '';
+              _emailCtrl.text = (data['email'] as String?) ?? (FirebaseAuth.instance.currentUser?.email ?? '');
+              _descCtrl.text = (data['description'] as String?) ?? '';
+              // 🔥 تم حذف تعبئة _hoursCtrl.text
+              _phoneCtrl.text = (data['phone'] as String?) ?? '';
+              _addressCtrl.text = (data['address'] as String?) ?? '';
               _logoUrl = data['logoUrl'];
               _loadedOnce = true;
             }
@@ -166,6 +202,7 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
               child: Form(
                 key: _formKey,
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // شعار المتجر
                     Center(
@@ -200,20 +237,55 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                     ),
                     const SizedBox(height: 20),
 
+                    // Store Name (read-only)
+                    const Text('Store Name', style: TextStyle(color: kText)),
+                    const SizedBox(height: 6),
                     TextFormField(
                       controller: _nameCtrl,
                       readOnly: true,
-                      decoration: _dec(hint: 'Store Name', icon: Icons.store),
+                      decoration: _dec(
+                        hint: 'Store Name',
+                        icon: Icons.store_outlined,
+                        readOnly: true, // نمط القراءة فقط
+                      ),
                     ),
                     const SizedBox(height: 14),
 
+                    // Email (read-only) + change password link
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text('Email', style: TextStyle(color: kText)),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const ChangePasswordPage(),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            'Change Password',
+                            style: TextStyle(color: kPrimary, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
                     TextFormField(
                       controller: _emailCtrl,
                       readOnly: true,
-                      decoration: _dec(hint: 'Email', icon: Icons.email),
+                      decoration: _dec(
+                        hint: 'Email',
+                        icon: Icons.email_outlined,
+                        readOnly: true, // نمط القراءة فقط
+                      ),
                     ),
                     const SizedBox(height: 14),
 
+                    // Short Description
+                    const Text('Description', style: TextStyle(color: kText)),
+                    const SizedBox(height: 6),
                     TextFormField(
                       controller: _descCtrl,
                       maxLines: 2,
@@ -222,13 +294,41 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                     ),
                     const SizedBox(height: 14),
 
-                    TextFormField(
-                      controller: _hoursCtrl,
-                      decoration: _dec(
-                          hint: 'Working Hours', icon: Icons.access_time),
+                    // 🛑 Working Hours (الآن هو زر/مؤشر بدل حقل نص)
+                    const Text('Working Hours', style: TextStyle(color: kText)),
+                    const SizedBox(height: 6),
+
+                    // 🛑 استخدام InkWell مع InputDecorator ليكون شكله كحقل نص لكنه زر
+                    InkWell(
+                      onTap: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => WorkingHoursSettingsPage(storeId: _uid),
+                          ),
+                        );
+                        // لا نحتاج لـ setState لأن الـ StreamBuilder سيقوم بتحديث نفسه
+                      },
+                      borderRadius: BorderRadius.circular(10),
+                      child: InputDecorator(
+                        decoration: _dec(
+                          hint: 'Set Hours',
+                          icon: Icons.calendar_today_outlined,
+                          suffix: const Icon(Icons.edit, color: kPrimary, size: 20),
+                        ),
+                        child: Text(
+                          _workingHoursDisplay,
+                          style: TextStyle(
+                            color: workingHours == null ? kHint : kText,
+                            fontSize: 13.5,
+                          ),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 14),
 
+                    // Phone Number
+                    const Text('Phone Number', style: TextStyle(color: kText)),
+                    const SizedBox(height: 6),
                     TextFormField(
                       controller: _phoneCtrl,
                       decoration:
@@ -236,6 +336,9 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                     ),
                     const SizedBox(height: 14),
 
+                    // Address
+                    const Text('Address', style: TextStyle(color: kText)),
+                    const SizedBox(height: 6),
                     TextFormField(
                       controller: _addressCtrl,
                       maxLines: 2,

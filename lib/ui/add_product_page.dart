@@ -5,6 +5,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+// 🔥 تم إضافة الاستيرادات المفقودة لعمل الـ BottomBar
+import 'dashboard_page.dart';
+import 'shop_profile_page.dart';
+import 'customer_messages_pages.dart';
+import 'reports_page.dart' as rp;
+
 class AddProductPage extends StatefulWidget {
   const AddProductPage({super.key, this.storeId});
   final String? storeId;
@@ -156,6 +162,11 @@ class _AddProductPageState extends State<AddProductPage> {
         ),
         title: const Text('Add New Product', style: TextStyle(fontWeight: FontWeight.w700)),
         centerTitle: true,
+        // 🔥 تم إضافة هذه لتظهر في الـ AppBar
+        actions: const [
+          _StoreHeaderChipSmall(),
+          SizedBox(width: 8),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -289,6 +300,138 @@ class _AddProductPageState extends State<AddProductPage> {
           ),
         ),
       ),
+
+      // ✅ Bottom bar
+      bottomNavigationBar: SafeArea(
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F5F9),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(.05), blurRadius: 8),
+            ],
+          ),
+          child: NavigationBar(
+            selectedIndex: 1, // كما هو
+            indicatorColor: Colors.transparent,
+            destinations: const [
+              NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
+              NavigationDestination(icon: Icon(Icons.inbox_outlined), label: 'Inbox'),
+              NavigationDestination(
+                icon: Icon(Icons.bar_chart_outlined),
+                label: 'Reports',
+              ),
+            ],
+            onDestinationSelected: (i) async {
+              if (i == 0) {
+                // Home → Dashboard
+                Navigator.of(context).pushAndRemoveUntil(
+                  // 🔥 تم إزالة const
+                  MaterialPageRoute(builder: (_) => DashboardPage()),
+                      (_) => false,
+                );
+              } else if (i == 1) {
+                // ✅ Inbox → Customer Messages
+                final sid =
+                    widget.storeId ?? FirebaseAuth.instance.currentUser?.uid;
+                if (sid != null) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      // 🔥 تم إزالة const
+                      builder: (_) => CustomerMessagesIndexPage(storeId: sid),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('لا يمكن فتح الرسائل الآن.')),
+                  );
+                }
+              } else if (i == 2) {
+                // ✅ Reports → ReportsPage
+                Navigator.of(context).push(
+                  // 🔥 تم إزالة const
+                  MaterialPageRoute(builder: (_) => rp.ReportsPage()),
+                );
+              }
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StoreHeaderChipSmall extends StatelessWidget {
+  const _StoreHeaderChipSmall();
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+
+    return StreamBuilder<DocumentSnapshot>(
+      stream:
+      FirebaseFirestore.instance.collection('shops').doc(uid).snapshots(),
+      builder: (context, snap) {
+        String name = 'Store';
+        String? logo;
+        if (snap.hasData && snap.data!.exists) {
+          final data = snap.data!.data() as Map<String, dynamic>;
+          name = (data['name'] as String?)?.trim().isNotEmpty == true
+              ? data['name']
+              : 'Store';
+          logo = data['logoUrl'] as String?;
+        }
+
+        return Padding(
+          padding: const EdgeInsetsDirectional.only(end: 6),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () {
+                Navigator.of(context).push(
+                  // 🔥 تم إزالة const
+                  MaterialPageRoute(builder: (_) => ShopProfilePage()),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(
+                      radius: 12,
+                      backgroundColor: primary.withOpacity(.15),
+                      backgroundImage:
+                      (logo != null && logo.isNotEmpty) ? NetworkImage(logo) : null,
+                      child: (logo == null || logo.isEmpty)
+                          ? Icon(Icons.store, color: primary, size: 16)
+                          : null,
+                    ),
+                    const SizedBox(height: 2),
+                    SizedBox(
+                      width: 80,
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
