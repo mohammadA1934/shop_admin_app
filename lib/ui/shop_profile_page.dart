@@ -25,7 +25,6 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
-  // 🔥 تم حذف _hoursCtrl نهائياً لأنه لم يعد حقل نص
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
 
@@ -45,7 +44,6 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _descCtrl.dispose();
-    // 🔥 تم حذف _hoursCtrl.dispose();
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
     super.dispose();
@@ -74,10 +72,12 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
         borderRadius: BorderRadius.circular(10),
         borderSide: const BorderSide(color: kPrimary, width: 1.4),
       ),
+      suffixIcon: suffix, // إضافة الأيقونة المساعدة هنا (مثل أيقونة التعديل)
     );
   }
 
   Future<void> _pickAndUploadLogo() async {
+    // ... (هذه الدالة تبقى كما هي إذا كنت تريد إبقاء وظيفة رفع الصور)
     try {
       final picked = await _picker.pickImage(source: ImageSource.gallery);
       if (picked == null) return;
@@ -114,13 +114,10 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
     if (workingHours == null || workingHours.isEmpty) {
       return 'Not set. Tap to configure.';
     }
-    // عرض بسيط لأوقات الأسبوع (مثال: Mon-Fri: 9:00 - 17:00)
     final mon = workingHours['Mon'] as Map<String, dynamic>?;
     final sun = workingHours['Sun'] as Map<String, dynamic>?;
 
-    // محاولة لإعطاء مؤشر عن حالة أوقات العمل
     if (mon != null && sun != null) {
-      // إذا كانت جميع الأيام متطابقة (فقط كمثال تبسيط)
       if (mon['start'] == sun['start'] && mon['end'] == sun['end']) {
         return 'Daily: ${mon['start']} - ${mon['end']} (tap to edit)';
       }
@@ -133,10 +130,15 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
   Future<void> _save() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() => _loading = true);
+
+    // 💡 جلب اسم المتجر الجديد
+    final name = _nameCtrl.text.trim();
+
     try {
       await FirebaseFirestore.instance.collection('shops').doc(_uid).set({
+        // 💡 تحديث اسم المتجر في Firestore
+        'name': name,
         'description': _descCtrl.text.trim(),
-        // 🔥 تم حذف 'hours' من الحفظ
         'phone': _phoneCtrl.text.trim(),
         'address': _addressCtrl.text.trim(),
         'updatedAt': Timestamp.now(),
@@ -145,7 +147,6 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('تم تحديث البيانات بنجاح ✅')));
-      // تم إبقاء النافيجيتور للحالة العادية (يمكن الرجوع للخلف)
       Navigator.of(context).maybePop();
     } catch (_) {
       if (!mounted) return;
@@ -181,16 +182,13 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
 
             final data = (snap.data?.data() ?? {}) as Map<String, dynamic>;
 
-            // 🛑 تحديث عرض أوقات العمل في الواجهة بناءً على الداتا المجلوبة
             final workingHours = data['workingHours'] as Map<String, dynamic>?;
             _workingHoursDisplay = _getWorkingHoursDisplay(workingHours);
 
-            // مرّة واحدة فقط نعبيّ الكنترولرز من الداتا
             if (!_loadedOnce) {
               _nameCtrl.text = (data['name'] as String?) ?? '';
               _emailCtrl.text = (data['email'] as String?) ?? (FirebaseAuth.instance.currentUser?.email ?? '');
               _descCtrl.text = (data['description'] as String?) ?? '';
-              // 🔥 تم حذف تعبئة _hoursCtrl.text
               _phoneCtrl.text = (data['phone'] as String?) ?? '';
               _addressCtrl.text = (data['address'] as String?) ?? '';
               _logoUrl = data['logoUrl'];
@@ -237,21 +235,21 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Store Name (read-only)
+                    // Store Name (الآن قابل للتعديل)
                     const Text('Store Name', style: TextStyle(color: kText)),
                     const SizedBox(height: 6),
                     TextFormField(
                       controller: _nameCtrl,
-                      readOnly: true,
+                      // 💡 تم حذف readOnly: true لتمكين التعديل
                       decoration: _dec(
                         hint: 'Store Name',
                         icon: Icons.store_outlined,
-                        readOnly: true, // نمط القراءة فقط
+                        // 💡 تم حذف readOnly: true من هنا ليعرض نمط الإدخال العادي
                       ),
                     ),
                     const SizedBox(height: 14),
 
-                    // Email (read-only) + change password link
+                    // Email (Read-only) + change password link
                     Row(
                       children: [
                         const Expanded(
@@ -274,7 +272,7 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                     ),
                     TextFormField(
                       controller: _emailCtrl,
-                      readOnly: true,
+                      readOnly: true, // ⬅️ الإيميل يبقى للقراءة فقط
                       decoration: _dec(
                         hint: 'Email',
                         icon: Icons.email_outlined,
@@ -294,11 +292,10 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                     ),
                     const SizedBox(height: 14),
 
-                    // 🛑 Working Hours (الآن هو زر/مؤشر بدل حقل نص)
+                    // Working Hours (الآن هو زر/مؤشر بدل حقل نص)
                     const Text('Working Hours', style: TextStyle(color: kText)),
                     const SizedBox(height: 6),
 
-                    // 🛑 استخدام InkWell مع InputDecorator ليكون شكله كحقل نص لكنه زر
                     InkWell(
                       onTap: () async {
                         await Navigator.of(context).push(
@@ -306,7 +303,6 @@ class _ShopProfilePageState extends State<ShopProfilePage> {
                             builder: (_) => WorkingHoursSettingsPage(storeId: _uid),
                           ),
                         );
-                        // لا نحتاج لـ setState لأن الـ StreamBuilder سيقوم بتحديث نفسه
                       },
                       borderRadius: BorderRadius.circular(10),
                       child: InputDecorator(
